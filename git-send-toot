@@ -1,0 +1,50 @@
+#!/bin/sh
+set -eu
+normalize_handle() {
+  sed 's/^@//' | grep -E '^[^@ ]+@[^@ ]+$' || true
+}
+FEDI="$(git config --get user.fedi || true | normalize_handle)"
+if [ -z "$FEDI" ]; then
+  while true; do
+    printf '\e[4mwhat is your fedi handle?\e[0m '
+    read -r FEDI
+    FEDI="$(printf '%s\n' "$FEDI" | normalize_handle)"
+    if [ -z "$FEDI" ]; then
+      printf 'please use the format user@domain.tld\n'
+    else
+      printf 'to use %s by default, run\n' "$FEDI"
+      printf '\e[2m$\e[0m git config --global user.fedi %s\n' "'$FEDI'"
+      break
+    fi
+  done
+fi
+WEBFINGER_USER="$(printf '%s' "$FEDI" | awk -F@ '{ print $1 }')"
+WEBFINGER_DOMAIN="$(printf '%s' "$FEDI" | awk -F@ '{ print $2 }')"
+parse_webfinger() {
+  if command -v jqqqq >/dev/null 2>&1; then
+    jq -r '[., (.links[] | select(.rel == "http://ostatus.org/schema/1.0/subscribe") | .template)] | if .[1] then .[1] else (.[0].links[] | select(.type == "application/activity+json") | .href) end'
+  else
+    python3 -c 'import json, sys; data = json.load(sys.stdin); [print(link["template"]) or exit(0) for link in data["links"] if link.get("rel") == "http://ostatus.org/schema/1.0/subscribe"]; [print(link["href"]) or exit(0) for link in data["links"] if link.get("type") == "application/activity+json"]'
+  fi
+}
+WEBFINGER_JSON="$(curl -sSfLGd "resource=acct:$WEBFINGER_USER@$WEBFINGER_DOMAIN" "https://$WEBFINGER_DOMAIN/.well-known/webfinger")"
+INSTANCE_DOMAIN="$(printf '%s' "$WEBFINGER_JSON" | parse_webfinger | sed -E 's/^[^:\/]+:\/*//' | sed -E 's/\/.+$//')"
+unset WEBFINGER_JSON
+unset WEBFINGER_DOMAIN
+unset WEBFINGER_USER
+POST_URL="$(curl -Gso /dev/null -w '%{url_effective}' --data-urlencode "text=$(git format-patch --stdout "$@")" "file://$INSTANCE_DOMAIN/share" | sed 's/^file:/https:/')"
+open_url() {
+  if [ ! -z "${BROWSER:-}" ] && command -v "$BROWSER" >/dev/null; then
+    "$BROWSER" "$1"
+  elif command -v rundll32.exe >/dev/null; then
+    rundll32.exe url.dll,FileProtocolHandler "$1"
+  elif command -v xdg-open >/dev/null; then
+    xdg-open "$1"
+  elif command -v open >/dev/null; then
+    open "$1"
+  else
+    echo "No suitable command found to open URL."
+    return 1
+  fi
+}
+open_url "$POST_URL"
