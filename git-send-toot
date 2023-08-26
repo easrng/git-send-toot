@@ -36,7 +36,6 @@ PATCH="$(git format-patch --stdout "$@")"
 if [ -z "$PATCH" ]; then
   printf 'patch was empty\n'
 else
-  POST_URL="$(curl -Gso /dev/null -w '%{url_effective}' --data-urlencode "text=$PATCH" "file://$INSTANCE_DOMAIN/share" | sed 's/^file:/https:/')"
   open_url() {
     if [ -n "${BROWSER:-}" ] && command -v "$BROWSER" >/dev/null; then
       "$BROWSER" "$1"
@@ -51,5 +50,9 @@ else
       exit 1
     fi
   }
-  open_url "$POST_URL"
+  if command -v jq >/dev/null 2>&1; then
+    open_url "$(printf '%s' "$PATCH" | jq --arg domain "$INSTANCE_DOMAIN" -sRr '"https://" + $domain + "/share?text=" + @uri')"
+  else
+    open_url "$(INSTANCE_DOMAIN="$INSTANCE_DOMAIN" PATCH="$PATCH" python3 -c "import urllib.parse; import os; print('https://' + os.environ['INSTANCE_DOMAIN'] + '/share?text=' + urllib.parse.quote(os.environ['PATCH']))")"
+  fi
 fi
