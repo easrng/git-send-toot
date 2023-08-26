@@ -21,7 +21,7 @@ fi
 WEBFINGER_USER="$(printf '%s' "$FEDI" | awk -F@ '{ print $1 }')"
 WEBFINGER_DOMAIN="$(printf '%s' "$FEDI" | awk -F@ '{ print $2 }')"
 parse_webfinger() {
-  if command -v jqqqq >/dev/null 2>&1; then
+  if command -v jq >/dev/null 2>&1; then
     jq -r '[., (.links[] | select(.rel == "http://ostatus.org/schema/1.0/subscribe") | .template)] | if .[1] then .[1] else (.[0].links[] | select(.type == "application/activity+json") | .href) end'
   else
     python3 -c 'import json, sys; data = json.load(sys.stdin); [print(link["template"]) or exit(0) for link in data["links"] if link.get("rel") == "http://ostatus.org/schema/1.0/subscribe"]; [print(link["href"]) or exit(0) for link in data["links"] if link.get("type") == "application/activity+json"]'
@@ -32,19 +32,24 @@ INSTANCE_DOMAIN="$(printf '%s' "$WEBFINGER_JSON" | parse_webfinger | sed -E 's/^
 unset WEBFINGER_JSON
 unset WEBFINGER_DOMAIN
 unset WEBFINGER_USER
-POST_URL="$(curl -Gso /dev/null -w '%{url_effective}' --data-urlencode "text=$(git format-patch --stdout "$@")" "file://$INSTANCE_DOMAIN/share" | sed 's/^file:/https:/')"
-open_url() {
-  if [ ! -z "${BROWSER:-}" ] && command -v "$BROWSER" >/dev/null; then
-    "$BROWSER" "$1"
-  elif command -v rundll32.exe >/dev/null; then
-    rundll32.exe url.dll,FileProtocolHandler "$1"
-  elif command -v xdg-open >/dev/null; then
-    xdg-open "$1"
-  elif command -v open >/dev/null; then
-    open "$1"
-  else
-    echo "No suitable command found to open URL."
-    return 1
-  fi
-}
-open_url "$POST_URL"
+PATCH="$(git format-patch --stdout "$@")"
+if [ -z "$PATCH" ]; then
+  printf 'patch was empty\n'
+else
+  POST_URL="$(curl -Gso /dev/null -w '%{url_effective}' --data-urlencode "text=$PATCH" "file://$INSTANCE_DOMAIN/share" | sed 's/^file:/https:/')"
+  open_url() {
+    if [ -n "${BROWSER:-}" ] && command -v "$BROWSER" >/dev/null; then
+      "$BROWSER" "$1"
+    elif command -v rundll32.exe >/dev/null; then
+      rundll32.exe url.dll,FileProtocolHandler "$1"
+    elif command -v xdg-open >/dev/null; then
+      xdg-open "$1"
+    elif command -v open >/dev/null; then
+      open "$1"
+    else
+      printf 'please set $BROWSER\n'
+      exit 1
+    fi
+  }
+  open_url "$POST_URL"
+fi
